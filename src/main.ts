@@ -29,7 +29,8 @@ interface App {
     };
   };
 }
-const ARCH = process.env.ARCH || 'linux';
+const PLATFORM = process.platform || 'linux';
+const ARCH = process.arch || 'amd64';
 const githubToken = core.getInput('github-token');
 core.info(githubToken);
 
@@ -70,7 +71,8 @@ function scrubSecrets(input: string): string {
 async function setupArgoCDCommand(): Promise<(params: string) => Promise<ExecResult>> {
   const argoBinaryPath = 'bin/argo';
   await tc.downloadTool(
-    `https://github.com/argoproj/argo-cd/releases/download/${VERSION}/argocd-${ARCH}-amd64`,
+    // https://github.com/argoproj/argo-cd/releases/download/v2.11.2/argocd-linux-amd64
+    `https://github.com/argoproj/argo-cd/releases/download/${VERSION}/argocd-${PLATFORM}-${ARCH}`,
     argoBinaryPath
   );
   fs.chmodSync(path.join(argoBinaryPath), '755');
@@ -120,8 +122,8 @@ async function postDiffComment(diffs: Diff[]): Promise<void> {
   const shortCommitSha = String(sha).substr(0, 7);
 
   const diffOutput = diffs.map(
-    ({ app, diff, error }) => `   
-App: [\`${app.metadata.name}\`](https://${ARGOCD_SERVER_URL}/applications/${app.metadata.name}) 
+    ({ app, diff, error }) => `
+App: [\`${app.metadata.name}\`](https://${ARGOCD_SERVER_URL}/applications/${app.metadata.name})
 YAML generation: ${error ? ' Error 🛑' : 'Success 🟢'}
 App sync status: ${app.status.sync.status === 'Synced' ? 'Synced ✅' : 'Out of Sync ⚠️ '}
 ${error
