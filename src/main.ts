@@ -5,6 +5,7 @@ import * as github from '@actions/github';
 import * as fs from 'fs';
 import * as path from 'path';
 import nodeFetch from 'node-fetch';
+import * as os from 'os';
 
 interface ExecResult {
   err?: Error | undefined;
@@ -29,15 +30,20 @@ interface App {
     };
   };
 }
-const PLATFORM = process.platform || 'linux';
-const ARCH = process.arch || 'amd64';
+const PLATFORM = os.platform() || 'linux';
+const ARCH = os.arch() || 'amd64';
 const githubToken = core.getInput('github-token');
 core.info(githubToken);
 
 const ARGOCD_SERVER_URL = core.getInput('argocd-server-url');
 const ARGOCD_TOKEN = core.getInput('argocd-token');
 const VERSION = core.getInput('argocd-version');
-const EXTRA_CLI_ARGS = core.getInput('argocd-extra-cli-args');
+const ENV = core.getInput('environment');
+const PLAINTEXT = core.getInput('plaintext').toLowerCase() === 'true';
+let EXTRA_CLI_ARGS = core.getInput('argocd-extra-cli-args');
+if (PLAINTEXT) {
+  EXTRA_CLI_ARGS += ' --plaintext';
+}
 
 const octokit = github.getOctokit(githubToken);
 
@@ -85,7 +91,11 @@ async function setupArgoCDCommand(): Promise<(params: string) => Promise<ExecRes
 }
 
 async function getApps(): Promise<App[]> {
-  const url = `https://${ARGOCD_SERVER_URL}/api/v1/applications?fields=items.metadata.name,items.spec.source.path,items.spec.source.repoURL,items.spec.source.targetRevision,items.spec.source.helm,items.spec.source.kustomize,items.status.sync.status`;
+  let protocol = 'https';
+  if (PLAINTEXT) {
+    protocol = 'http';
+  }
+  const url = `${protocol}://${ARGOCD_SERVER_URL}/api/v1/applications`;
   core.info(`Fetching apps from: ${url}`);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let responseJson: any;
@@ -100,10 +110,13 @@ async function getApps(): Promise<App[]> {
   }
 
   return (responseJson.items as App[]).filter(app => {
+    const targetRevision = app.spec.source.targetRevision;
+    const targetPrimary =
+      targetRevision === 'master' || targetRevision === 'main' || !targetRevision;
     return (
       app.spec.source.repoURL.includes(
         `${github.context.repo.owner}/${github.context.repo.repo}`
-      ) && (app.spec.source.targetRevision === 'master' || app.spec.source.targetRevision === 'main' || app.spec.source.targetRevision === 'HEAD')
+      ) && targetPrimary
     );
   });
 }
@@ -114,19 +127,28 @@ interface Diff {
   error?: ExecResult;
 }
 async function postDiffComment(diffs: Diff[]): Promise<void> {
+  let protocol = 'https';
+  if (PLAINTEXT) {
+    protocol = 'http';
+  }
+
   const { owner, repo } = github.context.repo;
   const sha = github.context.payload.pull_request?.head?.sha;
 
   const commitLink = `https://github.com/${owner}/${repo}/pull/${github.context.issue.number}/commits/${sha}`;
   const shortCommitSha = String(sha).substr(0, 7);
 
+  const prefixHeader = `## ArgoCD Diff on ${ENV}`;
   const diffOutput = diffs.map(
     ({ app, diff, error }) => `
-App: [\`${app.metadata.name}\`](https://${ARGOCD_SERVER_URL}/applications/${app.metadata.name})
+App: [\`${app.metadata.name}\`](${protocol}://${ARGOCD_SERVER_URL}/applications/${
+      app.metadata.name
+    })
 YAML generation: ${error ? ' Error 🛑' : 'Success 🟢'}
 App sync status: ${app.status.sync.status === 'Synced' ? 'Synced ✅' : 'Out of Sync ⚠️ '}
-${error
-        ? `
+${
+  error
+    ? `
 **\`stderr:\`**
 \`\`\`
 ${error.stderr}
@@ -137,11 +159,12 @@ ${error.stderr}
 ${JSON.stringify(error.err)}
 \`\`\`
 `
-        : ''
-      }
+    : ''
+}
 
-${diff
-        ? `
+${
+  diff
+    ? `
 <details>
 
 \`\`\`diff
@@ -150,14 +173,14 @@ ${diff}
 
 </details>
 `
-        : ''
-      }
+    : ''
+}
 ---
 `
   );
 
   const output = scrubSecrets(`
-## ArgoCD Diff for commit [\`${shortCommitSha}\`](${commitLink})
+${prefixHeader} for commit [\`${shortCommitSha}\`](${commitLink})
 _Updated at ${new Date().toLocaleString('en-US', { timeZone: 'America/Los_Angeles' })} PT_
   ${diffOutput.join('\n')}
 
@@ -174,18 +197,20 @@ _Updated at ${new Date().toLocaleString('en-US', { timeZone: 'America/Los_Angele
     repo
   });
 
-  const existingComment = commentsResponse.data.find(d => d.body!.includes('ArgoCD Diff for'));
+  // Delete stale comments
+  for (const comment of commentsResponse.data) {
+    if (comment.body?.includes(prefixHeader)) {
+      core.info(`deleting comment ${comment.id}`);
+      octokit.rest.issues.deleteComment({
+        owner,
+        repo,
+        comment_id: comment.id
+      });
+    }
+  }
 
-  // Existing comments should be updated even if there are no changes this round in order to indicate that
-  if (existingComment) {
-    octokit.rest.issues.updateComment({
-      owner,
-      repo,
-      comment_id: existingComment.id,
-      body: output
-    });
-    // Only post a new comment when there are changes
-  } else if (diffs.length) {
+  // Only post a new comment when there are changes
+  if (diffs.length) {
     octokit.rest.issues.createComment({
       issue_number: github.context.issue.number,
       owner,
