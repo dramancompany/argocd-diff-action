@@ -1693,7 +1693,7 @@ const path = __importStar(__webpack_require__(622));
 const node_fetch_1 = __importDefault(__webpack_require__(454));
 const os = __importStar(__webpack_require__(87));
 const PLATFORM = os.platform() || 'linux';
-const ARCH = os.arch() || 'amd64';
+const ARCH = (os.arch() === 'x86' ? 'amd64' : os.arch()) || 'amd64';
 const githubToken = core.getInput('github-token');
 core.info(githubToken);
 const ARGOCD_SERVER_URL = core.getInput('argocd-server-url');
@@ -8688,7 +8688,7 @@ function bytesToUuid(buf, offset) {
   var i = offset || 0;
   var bth = byteToHex;
   // join used to fix memory issue caused by concatenation: https://bugs.chromium.org/p/v8/issues/detail?id=3175#c4
-  return ([bth[buf[i++]], bth[buf[i++]], 
+  return ([bth[buf[i++]], bth[buf[i++]],
 	bth[buf[i++]], bth[buf[i++]], '-',
 	bth[buf[i++]], bth[buf[i++]], '-',
 	bth[buf[i++]], bth[buf[i++]], '-',
