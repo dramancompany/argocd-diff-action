@@ -31,7 +31,7 @@ interface App {
   };
 }
 const PLATFORM = os.platform() || 'linux';
-const ARCH = (os.arch() === 'x86' ? 'amd64' : os.arch()) || 'amd64';
+const ARCH = (os.arch() !== 'arm64' ? 'amd64' : 'arm64')
 const githubToken = core.getInput('github-token');
 const ARGOCD_SERVER_URL = core.getInput('argocd-server-url');
 const ARGOCD_TOKEN = core.getInput('argocd-token');
