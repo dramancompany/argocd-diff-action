@@ -1762,6 +1762,7 @@ function getApps() {
             responseJson = yield response.json();
         }
         catch (e) {
+	    core.info(responseJson.json());
             core.error(e);
         }
         return responseJson.items.filter(app => {
