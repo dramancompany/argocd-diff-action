@@ -1759,10 +1759,11 @@ function getApps() {
                 method: 'GET',
                 headers: { Cookie: `argocd.token=${ARGOCD_TOKEN}` }
             });
+	    core.info(response);
             responseJson = yield response.json();
+	    core.info(responseJson);
         }
         catch (e) {
-	    core.info(responseJson);
             core.error(e);
         }
         return responseJson.items.filter(app => {
